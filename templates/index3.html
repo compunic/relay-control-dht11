@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html>
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Smart Farm Dashboard</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    background:#0f172a;
+    color:white;
+    font-family:Arial,sans-serif;
+    padding:20px;
+}
+
+.header{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:20px;
+    flex-wrap:wrap;
+    gap:15px;
+}
+
+.title{
+    font-size:38px;
+    font-weight:bold;
+}
+
+.online{
+    background:#22c55e;
+    padding:10px 20px;
+    border-radius:12px;
+    font-weight:bold;
+}
+
+.grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+    gap:20px;
+}
+
+.card{
+    background:#1e293b;
+    border-radius:20px;
+    padding:25px;
+    box-shadow:0 0 15px rgba(0,0,0,0.3);
+}
+
+.card:hover{
+    transform:translateY(-4px);
+    transition:0.3s;
+}
+
+.card-title{
+    color:#cbd5e1;
+    margin-bottom:15px;
+    font-size:18px;
+}
+
+.value{
+    font-size:42px;
+    font-weight:bold;
+}
+
+.temp{ color:#f97316; }
+.hum{ color:#38bdf8; }
+.on{ color:#22c55e; }
+.off{ color:#ef4444; }
+
+.sensor-ok{ color:#22c55e; }
+.sensor-error{ color:#ef4444; }
+
+.info{
+    margin-top:8px;
+    color:#cbd5e1;
+    font-size:15px;
+}
+
+/* FILTER */
+.filter-box{
+    margin-top:25px;
+    background:#1e293b;
+    padding:20px;
+    border-radius:20px;
+}
+
+.filter-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    align-items:center;
+}
+
+select, input{
+    background:#0f172a;
+    color:white;
+    border:1px solid #334155;
+    border-radius:10px;
+    padding:12px;
+}
+
+button{
+    border:none;
+    border-radius:10px;
+    padding:12px 20px;
+    cursor:pointer;
+    font-weight:bold;
+}
+
+.btn-filter{
+    background:#22c55e;
+    color:white;
+}
+
+.chart-box{
+    margin-top:25px;
+    background:#1e293b;
+    padding:20px;
+    border-radius:20px;
+}
+
+.footer{
+    margin-top:25px;
+    text-align:center;
+    color:#94a3b8;
+}
+
+@media(max-width:768px){
+    .title{ font-size:26px; }
+    .value{ font-size:30px; }
+}
+
+</style>
+
+</head>
+
+<body>
+
+<!-- HEADER -->
+<div class="header">
+
+    <div class="title">SMART FARM DASHBOARD</div>
+
+    <div class="online">SYSTEM ONLINE</div>
+
+</div>
+
+<!-- GRID -->
+<div class="grid">
+
+    <div class="card">
+        <div class="card-title">🌡 Temperature</div>
+        <div class="value temp" id="temperature">0°C</div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">💧 Humidity</div>
+        <div class="value hum" id="humidity">0%</div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">💡 Relay</div>
+        <div class="value off" id="relay">OFF</div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">🧪 Sensor</div>
+        <div class="value" id="sensor_status">UNKNOWN</div>
+        <div class="info" id="sensor_text">Waiting data...</div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">📡 IoT Device</div>
+        <div class="value off" id="device_status">OFFLINE</div>
+        <div class="info" id="device_time">Waiting...</div>
+    </div>
+
+    <!-- 🔥 ACTIVE CONFIG STATUS -->
+    <div class="card">
+
+        <div class="card-title">⚙ Active Control</div>
+
+        <div class="info">Mode: <b id="active_mode">-</b></div>
+        <div class="info">LOW (ON): <b id="active_low">-</b></div>
+        <div class="info">HIGH (OFF): <b id="active_high">-</b></div>
+
+    </div>
+
+</div>
+
+<!-- CONTROL -->
+<div class="filter-box">
+
+    <div class="card-title">⚙ Control Setting</div>
+
+    <div class="filter-row">
+
+        <select id="mode">
+            <option value="AUTO">AUTO</option>
+            <option value="MANUAL">MANUAL</option>
+        </select>
+
+        <input type="number" id="low_temp" placeholder="LOW TEMP (ON)">
+        <input type="number" id="high_temp" placeholder="HIGH TEMP (OFF)">
+
+        <button class="btn-filter" onclick="saveConfig()">SAVE CONFIG</button>
+
+    </div>
+
+</div>
+
+<!-- FILTER -->
+<div class="filter-box">
+
+    <div class="card-title">📅 Data Filter</div>
+
+    <div class="filter-row">
+
+        <select id="period">
+            <option value="1">1 Hour</option>
+            <option value="6">6 Hours</option>
+            <option value="12">12 Hours</option>
+            <option value="24" selected>24 Hours</option>
+            <option value="168">7 Days</option>
+        </select>
+
+        <input type="datetime-local" id="start_date">
+        <input type="datetime-local" id="end_date">
+
+        <button class="btn-filter" onclick="loadData()">APPLY</button>
+
+    </div>
+
+</div>
+
+<!-- CHART -->
+<div class="chart-box">
+    <canvas id="chart"></canvas>
+</div>
+
+<div class="footer">
+    ESP32 + Flask + SQLite Smart Farm System
+</div>
+
+<script>
+
+const ctx = document.getElementById("chart");
+
+const chart = new Chart(ctx, {
+    type:'line',
+    data:{
+        labels:[],
+        datasets:[
+            {
+                label:'Temperature',
+                data:[],
+                borderColor:'#f97316',
+                tension:0.4
+            },
+            {
+                label:'Humidity',
+                data:[],
+                borderColor:'#38bdf8',
+                tension:0.4
+            }
+        ]
+    },
+    options:{
+        responsive:true,
+        plugins:{ legend:{ labels:{ color:'white' } } },
+        scales:{
+            x:{ ticks:{ color:'white' } },
+            y:{ ticks:{ color:'white' } }
+        }
+    }
+});
+
+
+// =========================
+// LOAD DATA
+// =========================
+async function loadData(){
+
+    const period = document.getElementById("period").value;
+    const start = document.getElementById("start_date").value;
+    const end = document.getElementById("end_date").value;
+
+    let url = "/history?period=" + period;
+
+    if(start && end){
+        url = "/history?start=" + start + "&end=" + end;
+    }
+
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if(data.length === 0) return;
+
+    const latest = data[data.length - 1];
+
+    document.getElementById("temperature").innerHTML =
+        latest.temperature == -1 ? "ERROR" : latest.temperature + "°C";
+
+    document.getElementById("humidity").innerHTML =
+        latest.humidity == -1 ? "ERROR" : latest.humidity + "%";
+
+    const relay = document.getElementById("relay");
+
+    if(latest.relay == 1){
+        relay.innerHTML = "ON";
+        relay.className = "value on";
+    }else{
+        relay.innerHTML = "OFF";
+        relay.className = "value off";
+    }
+
+    document.getElementById("sensor_status").innerHTML =
+        latest.sensor_status == "OK" ? "NORMAL" : "ERROR";
+
+    chart.data.labels = data.map(i => i.created_at);
+    chart.data.datasets[0].data = data.map(i => i.temperature);
+    chart.data.datasets[1].data = data.map(i => i.humidity);
+    chart.update();
+
+    loadDeviceStatus();
+    loadConfig();
+}
+
+
+// =========================
+// DEVICE STATUS
+// =========================
+async function loadDeviceStatus(){
+
+    const res = await fetch("/device_status");
+    const data = await res.json();
+
+    const el = document.getElementById("device_status");
+
+    if(data.status == "ONLINE"){
+        el.innerHTML = "ONLINE";
+        el.className = "value on";
+    }else{
+        el.innerHTML = "OFFLINE";
+        el.className = "value off";
+    }
+
+    document.getElementById("device_time").innerHTML =
+        "Last: " + data.last_update;
+}
+
+
+// =========================
+// LOAD ACTIVE CONFIG
+// =========================
+async function loadConfig(){
+
+    try{
+
+        const res = await fetch("/esp32");
+        const cfg = await res.json();
+
+        document.getElementById("active_mode").innerHTML =
+            cfg.mode || "-";
+
+        document.getElementById("active_low").innerHTML =
+            cfg.low_temp || "-";
+
+        document.getElementById("active_high").innerHTML =
+            cfg.high_temp || "-";
+
+    }catch(e){
+        console.log(e);
+    }
+}
+
+
+// =========================
+// SAVE CONFIG
+// =========================
+async function saveConfig(){
+
+    await fetch("/config",{
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body:JSON.stringify({
+            mode:document.getElementById("mode").value,
+            low_temp:document.getElementById("low_temp").value,
+            high_temp:document.getElementById("high_temp").value
+        })
+    });
+
+    alert("Configuration Saved");
+}
+
+
+// =========================
+// INIT LOOP
+// =========================
+loadData();
+
+setInterval(() => {
+    loadData();
+    loadConfig();
+}, 2000);
+
+</script>
+
+</body>
+</html>
