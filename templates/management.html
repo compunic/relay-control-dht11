@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Farm - Management</title>
+
+<style>
+
+*{
+margin:0;
+padding:0;
+box-sizing:border-box;
+font-family:Arial,Helvetica,sans-serif;
+}
+
+body{
+background:#f3f4f6;
+padding:20px;
+}
+
+h1{
+margin-bottom:20px;
+color:#2c3e50;
+}
+
+.grid{
+display:grid;
+grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+gap:15px;
+margin-bottom:20px;
+}
+
+.card{
+background:white;
+padding:15px;
+border-radius:10px;
+box-shadow:0 2px 8px rgba(0,0,0,.1);
+}
+
+.card h3{
+font-size:15px;
+margin-bottom:10px;
+color:#555;
+}
+
+.value{
+font-size:28px;
+font-weight:bold;
+color:#27ae60;
+}
+
+table{
+width:100%;
+border-collapse:collapse;
+background:white;
+box-shadow:0 2px 8px rgba(0,0,0,.1);
+margin-bottom:20px;
+}
+
+th,td{
+padding:10px;
+border-bottom:1px solid #ddd;
+text-align:left;
+}
+
+th{
+background:#2c7a4b;
+color:white;
+}
+
+button{
+padding:8px 15px;
+border:none;
+border-radius:5px;
+cursor:pointer;
+margin:3px;
+}
+
+.blue{background:#2196F3;color:white;}
+.red{background:#e53935;color:white;}
+.green{background:#43A047;color:white;}
+.orange{background:#FB8C00;color:white;}
+
+input{
+padding:8px;
+border:1px solid #ccc;
+border-radius:5px;
+}
+
+.section{
+background:white;
+padding:15px;
+margin-bottom:20px;
+border-radius:10px;
+box-shadow:0 2px 8px rgba(0,0,0,.1);
+}
+
+#msg{
+margin-top:10px;
+font-weight:bold;
+color:green;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<h1>⚙ Smart Farm Management</h1>
+
+<div class="grid">
+
+<div class="card">
+<h3>Total Device</h3>
+<div class="value" id="device">0</div>
+</div>
+
+<div class="card">
+<h3>Total Record</h3>
+<div class="value" id="record">0</div>
+</div>
+
+<div class="card">
+<h3>Database Size</h3>
+<div class="value" id="size">0 MB</div>
+</div>
+
+<div class="card">
+<h3>Last Data</h3>
+<div id="last">-</div>
+</div>
+
+</div>
+
+<div class="section">
+
+<h2>Device Summary</h2>
+
+<table>
+
+<thead>
+
+<tr>
+
+<th>Device</th>
+
+<th>Record</th>
+
+<th>Status</th>
+
+<th>Last Update</th>
+
+</tr>
+
+</thead>
+
+<tbody id="deviceTable">
+
+</tbody>
+
+</table>
+
+</div>
+
+<div class="section">
+
+<h2>Delete History Before</h2>
+
+<input type="datetime-local" id="date">
+
+<button class="orange" onclick="deleteBefore()">
+
+Delete
+
+</button>
+
+</div>
+
+<div class="section">
+
+<h2>Maintenance</h2>
+
+<button class="blue" onclick="backupDB()">
+
+Backup Database
+
+</button>
+
+<button class="green" onclick="vacuumDB()">
+
+Vacuum
+
+</button>
+
+<button class="red" onclick="deleteAll()">
+
+Delete ALL History
+
+</button>
+
+<div id="msg"></div>
+
+</div>
+
+<script>
+
+function show(msg,color="green"){
+let m=document.getElementById("msg");
+m.style.color=color;
+m.innerHTML=msg;
+setTimeout(()=>m.innerHTML="",3000);
+}
+
+async function loadStats(){
+
+let r=await fetch("/db_stats");
+
+let d=await r.json();
+
+device.innerHTML=d.total_device;
+
+record.innerHTML=d.total_record.toLocaleString();
+
+size.innerHTML=d.database_size+" MB";
+
+last.innerHTML=d.last_data??"-";
+
+}
+
+async function loadDevice(){
+
+let r=await fetch("/device_summary");
+
+let data=await r.json();
+
+let html="";
+
+data.forEach(x=>{
+
+html+=`
+<tr>
+
+<td>${x.device_name}</td>
+
+<td>${x.total_record}</td>
+
+<td>${x.status}</td>
+
+<td>${x.last_update??"-"}</td>
+
+</tr>
+`;
+
+});
+
+document.getElementById("deviceTable").innerHTML=html;
+
+}
+
+async function vacuumDB(){
+
+if(!confirm("Vacuum Database ?"))return;
+
+await fetch("/vacuum",{
+
+method:"POST"
+
+});
+
+show("Database Optimized");
+
+loadStats();
+
+}
+
+async function deleteAll(){
+
+if(!confirm("Hapus Semua History ?"))return;
+
+let r=await fetch("/delete_all",{
+
+method:"POST"
+
+});
+
+let d=await r.json();
+
+show("Deleted : "+d.deleted+" Record","red");
+
+loadStats();
+
+loadDevice();
+
+}
+
+async function deleteBefore(){
+
+let date=document.getElementById("date").value;
+
+if(date==""){
+
+alert("Pilih tanggal");
+
+return;
+
+}
+
+let r=await fetch("/delete_before",{
+
+method:"POST",
+
+headers:{
+
+"Content-Type":"application/json"
+
+},
+
+body:JSON.stringify({
+
+date:date.replace("T"," ")
+
+})
+
+});
+
+let d=await r.json();
+
+show("Deleted : "+d.deleted+" Record","red");
+
+loadStats();
+
+loadDevice();
+
+}
+
+function backupDB(){
+
+window.location="/backup";
+
+}
+
+loadStats();
+
+loadDevice();
+
+setInterval(()=>{
+
+loadStats();
+
+loadDevice();
+
+},10000);
+
+</script>
+
+</body>
+
+</html>
