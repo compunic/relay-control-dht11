@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-DB = "relaydht.db"
+DB = "suhudankelembban.db"
 
 # ==================================================
 # DATABASE
