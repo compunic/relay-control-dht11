@@ -1,5 +1,6 @@
 
 from flask import Flask, render_template, request, jsonify
+from flask import send_file
 import sqlite3
 from datetime import datetime, timedelta
 
@@ -531,7 +532,111 @@ def delete_history(device_id):
         "status": "ok"
     })
 
+# ==================================================
+# MANAGEMENT DATA
+# ==================================================
+@app.route("/management")
+def management():
+    return render_template("management.html")
 
+@app.route("/db_stats")
+def db_stats():
+
+    conn = get_db()
+
+    total = conn.execute(
+        "SELECT COUNT(*) FROM sensor_data"
+    ).fetchone()[0]
+
+    device = conn.execute(
+        "SELECT COUNT(*) FROM devices"
+    ).fetchone()[0]
+
+    first = conn.execute(
+        "SELECT MIN(created_at) FROM sensor_data"
+    ).fetchone()[0]
+
+    last = conn.execute(
+        "SELECT MAX(created_at) FROM sensor_data"
+    ).fetchone()[0]
+
+    conn.close()
+
+    return jsonify({
+        "total_record": total,
+        "total_device": device,
+        "first_data": first,
+        "last_data": last
+    })
+
+# ==================================================
+# HAPUS SEMUA
+# ==================================================
+@app.route("/delete_all", methods=["POST"])
+def delete_all():
+
+    conn = get_db()
+
+    conn.execute("DELETE FROM sensor_data")
+
+    conn.commit()
+
+    conn.close()
+
+    return jsonify({
+        "status":"ok"
+    })
+
+# ==================================================
+# HAPUS SEBELUMNYA
+# ==================================================
+@app.route("/delete_before", methods=["POST"])
+def delete_before():
+
+    date = request.json["date"]
+
+    conn = get_db()
+
+    conn.execute(
+        "DELETE FROM sensor_data WHERE created_at < ?",
+        (date,)
+    )
+
+    conn.commit()
+
+    conn.close()
+
+    return jsonify({
+        "status":"ok"
+    })
+# ==================================================
+# VACUUM
+# ==================================================
+
+@app.route("/vacuum", methods=["POST"])
+def vacuum():
+
+    conn = get_db()
+
+    conn.execute("VACUUM")
+
+    conn.close()
+
+    return jsonify({
+        "status":"ok"
+    })
+
+# ==================================================
+# BACKUP DATABASE
+# ==================================================
+
+@app.route("/backup")
+def backup():
+
+    return send_file(
+        DB,
+        as_attachment=True
+    )
 # ==================================================
 # SERVER
 # ==================================================
