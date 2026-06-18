@@ -2,6 +2,7 @@
 from flask import Flask, render_template, request, jsonify
 from flask import send_file
 import sqlite3
+import os
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
@@ -539,34 +540,39 @@ def delete_history(device_id):
 def management():
     return render_template("management.html")
 
+
+
 @app.route("/db_stats")
 def db_stats():
 
     conn = get_db()
 
-    total = conn.execute(
-        "SELECT COUNT(*) FROM sensor_data"
-    ).fetchone()[0]
-
-    device = conn.execute(
+    total_device = conn.execute(
         "SELECT COUNT(*) FROM devices"
     ).fetchone()[0]
 
-    first = conn.execute(
+    total_record = conn.execute(
+        "SELECT COUNT(*) FROM sensor_data"
+    ).fetchone()[0]
+
+    first_data = conn.execute(
         "SELECT MIN(created_at) FROM sensor_data"
     ).fetchone()[0]
 
-    last = conn.execute(
+    last_data = conn.execute(
         "SELECT MAX(created_at) FROM sensor_data"
     ).fetchone()[0]
 
     conn.close()
 
+    db_size = round(os.path.getsize(DB) / (1024 * 1024), 2)
+
     return jsonify({
-        "total_record": total,
-        "total_device": device,
-        "first_data": first,
-        "last_data": last
+        "total_device": total_device,
+        "total_record": total_record,
+        "database_size": db_size,
+        "first_data": first_data,
+        "last_data": last_data
     })
 
 # ==================================================
