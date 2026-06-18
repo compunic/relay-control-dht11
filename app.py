@@ -1,29 +1,35 @@
+
 from flask import Flask, render_template, request, jsonify
 import sqlite3
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
+
 DB = "relaydht.db"
 
-# =========================
-# GLOBAL CONFIG
-# =========================
-relay_status = 0
-mode = "AUTO"
-low_temp = 30
-high_temp = 34
+# ==================================================
+# DATABASE
+# ==================================================
 
-
-# =========================
-# INIT DB
-# =========================
-def init_db():
+def get_db():
     conn = sqlite3.connect(DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+
+    conn = get_db()
     c = conn.cursor()
 
+    # ==========================================
+    # DATA SENSOR
+    # ==========================================
     c.execute("""
     CREATE TABLE IF NOT EXISTS sensor_data(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        device_id TEXT,
+        device_name TEXT,
         temperature REAL,
         humidity REAL,
         relay INTEGER,
@@ -32,162 +38,509 @@ def init_db():
     )
     """)
 
+    # ==========================================
+    # DEVICE CONFIG
+    # ==========================================
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS devices(
+        device_id TEXT PRIMARY KEY,
+        device_name TEXT,
+        relay INTEGER DEFAULT 0,
+        mode TEXT DEFAULT 'AUTO',
+        low_temp REAL DEFAULT 30,
+        high_temp REAL DEFAULT 34,
+        updated_at TEXT
+    )
+    """)
+
     conn.commit()
     conn.close()
 
+
 init_db()
 
+# ==================================================
+# HELPER
+# ==================================================
 
-# =========================
+def create_device_if_not_exists(
+        device_id,
+        device_name="Unknown Device"):
+
+    conn = get_db()
+    c = conn.cursor()
+
+    c.execute("""
+    SELECT *
+    FROM devices
+    WHERE device_id=?
+    """, (device_id,))
+
+    row = c.fetchone()
+
+    if not row:
+
+        c.execute("""
+        INSERT INTO devices
+        (
+            device_id,
+            device_name,
+            relay,
+            mode,
+            low_temp,
+            high_temp,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            device_id,
+            device_name,
+            0,
+            "AUTO",
+            30,
+            34,
+            datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+        ))
+
+    else:
+
+        c.execute("""
+        UPDATE devices
+        SET device_name=?
+        WHERE device_id=?
+        """,
+        (
+            device_name,
+            device_id
+        ))
+
+    conn.commit()
+    conn.close()
+
+
+# ==================================================
 # DASHBOARD
-# =========================
+# ==================================================
+
 @app.route("/")
 def index():
-    return render_template("index3.html")
+    return render_template("index_multi.html")
 
 
-# =========================
-# ESP32 CONFIG ENDPOINT
-# =========================
-@app.route("/esp32")
-def esp32():
-    return jsonify({
-        "relay": relay_status,
-        "mode": mode,
-        "low_temp": low_temp,
-        "high_temp": high_temp
-    })
+# ==================================================
+# LIST DEVICE
+# ==================================================
+
+@app.route("/devices")
+def devices():
+
+    conn = get_db()
+
+    rows = conn.execute("""
+    SELECT *
+    FROM devices
+    ORDER BY device_name
+    """).fetchall()
+
+    conn.close()
+
+    return jsonify([
+        dict(r)
+        for r in rows
+    ])
 
 
-# =========================
-# UPDATE SENSOR DATA
-# =========================
+# ==================================================
+# ESP32 GET CONFIG
+# ==================================================
+
+@app.route("/esp32/<device_id>")
+def esp32(device_id):
+
+    create_device_if_not_exists(
+        device_id
+    )
+
+    conn = get_db()
+
+    row = conn.execute("""
+    SELECT *
+    FROM devices
+    WHERE device_id=?
+    """,
+    (device_id,)
+    ).fetchone()
+
+    conn.close()
+
+    return jsonify(dict(row))
+
+
+# ==================================================
+# UPDATE SENSOR
+# ==================================================
+
 @app.route("/update", methods=["POST"])
 def update():
 
     data = request.json
 
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
+    device_id = data.get(
+        "device_id",
+        "unknown"
+    )
 
-    c.execute("""
+    device_name = data.get(
+        "device_name",
+        "Unknown Device"
+    )
+
+    create_device_if_not_exists(
+        device_id,
+        device_name
+    )
+
+    conn = get_db()
+
+    conn.execute("""
     INSERT INTO sensor_data
-    (temperature, humidity, relay, sensor_status, created_at)
-    VALUES (?, ?, ?, ?, ?)
-    """, (
+    (
+        device_id,
+        device_name,
+        temperature,
+        humidity,
+        relay,
+        sensor_status,
+        created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    """,
+    (
+        device_id,
+        device_name,
         data.get("temperature"),
         data.get("humidity"),
         data.get("relay"),
-        data.get("sensor_status"),
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        data.get("sensor_status", "OK"),
+        datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
     ))
 
     conn.commit()
     conn.close()
 
-    return jsonify({"status": "ok"})
+    return jsonify({
+        "status": "ok",
+        "device_id": device_id,
+        "device_name": device_name
+    })
 
 
-# =========================
-# HISTORY FILTER
-# =========================
+# ==================================================
+# HISTORY
+# ==================================================
+
 @app.route("/history")
 def history():
 
+    device_id = request.args.get("device")
     period = request.args.get("period", "24")
+
     start = request.args.get("start")
     end = request.args.get("end")
 
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
+    conn = get_db()
+
+    query = """
+    SELECT *
+    FROM sensor_data
+    WHERE 1=1
+    """
+
+    params = []
+
+    if device_id:
+
+        query += """
+        AND device_id=?
+        """
+
+        params.append(device_id)
 
     if start and end:
 
-        c.execute("""
-        SELECT * FROM sensor_data
-        WHERE created_at BETWEEN ? AND ?
-        ORDER BY id ASC
-        """, (start.replace("T"," "), end.replace("T"," ")))
+        query += """
+        AND created_at
+        BETWEEN ? AND ?
+        """
+
+        params.append(
+            start.replace("T", " ")
+        )
+
+        params.append(
+            end.replace("T", " ")
+        )
 
     else:
 
         hours = int(period)
-        limit = datetime.now() - timedelta(hours=hours)
 
-        c.execute("""
-        SELECT * FROM sensor_data
-        WHERE created_at >= ?
-        ORDER BY id ASC
-        """, (limit.strftime("%Y-%m-%d %H:%M:%S"),))
+        limit = datetime.now() - timedelta(
+            hours=hours
+        )
 
-    rows = c.fetchall()
+        query += """
+        AND created_at >= ?
+        """
+
+        params.append(
+            limit.strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+        )
+
+    query += " ORDER BY id ASC"
+
+    rows = conn.execute(
+        query,
+        tuple(params)
+    ).fetchall()
+
     conn.close()
 
-    return jsonify([dict(r) for r in rows])
+    return jsonify([
+        dict(r)
+        for r in rows
+    ])
 
 
-# =========================
+# ==================================================
 # DEVICE STATUS
-# =========================
-@app.route("/device_status")
-def device_status():
+# ==================================================
 
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
+@app.route("/device_status/<device_id>")
+def device_status(device_id):
 
-    c.execute("""
-    SELECT created_at FROM sensor_data
-    ORDER BY id DESC LIMIT 1
-    """)
+    conn = get_db()
 
-    row = c.fetchone()
+    row = conn.execute("""
+    SELECT created_at
+    FROM sensor_data
+    WHERE device_id=?
+    ORDER BY id DESC
+    LIMIT 1
+    """,
+    (device_id,)
+    ).fetchone()
+
     conn.close()
 
     if not row:
-        return jsonify({"status":"OFFLINE","last_update":"-"})
 
-    last = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
-    diff = (datetime.now() - last).total_seconds()
+        return jsonify({
+            "status": "OFFLINE",
+            "last_update": "-"
+        })
+
+    last = datetime.strptime(
+        row["created_at"],
+        "%Y-%m-%d %H:%M:%S"
+    )
+
+    diff = (
+        datetime.now() - last
+    ).total_seconds()
 
     return jsonify({
-        "status": "ONLINE" if diff < 10 else "OFFLINE",
-        "last_update": row[0]
+        "status":
+            "ONLINE"
+            if diff < 10
+            else "OFFLINE",
+        "last_update":
+            row["created_at"]
     })
 
 
-# =========================
-# CONFIG FROM DASHBOARD
-# =========================
-@app.route("/config", methods=["POST"])
-def config():
+# ==================================================
+# CONFIG DEVICE
+# ==================================================
 
-    global mode, low_temp, high_temp, relay_status
+@app.route(
+    "/config/<device_id>",
+    methods=["POST"]
+)
+def config(device_id):
+
+    create_device_if_not_exists(
+        device_id
+    )
 
     data = request.json
 
-    mode = data.get("mode", "AUTO")
-    low_temp = float(data.get("low_temp", 30))
-    high_temp = float(data.get("high_temp", 32))
-    relay_status = int(data.get("relay", 0))
+    relay = int(
+        data.get("relay", 0)
+    )
 
-    return jsonify({"status":"ok"})
+    mode = data.get(
+        "mode",
+        "AUTO"
+    )
+
+    low_temp = float(
+        data.get(
+            "low_temp",
+            30
+        )
+    )
+
+    high_temp = float(
+        data.get(
+            "high_temp",
+            34
+        )
+    )
+
+    conn = get_db()
+
+    conn.execute("""
+    UPDATE devices
+    SET
+        relay=?,
+        mode=?,
+        low_temp=?,
+        high_temp=?,
+        updated_at=?
+    WHERE device_id=?
+    """,
+    (
+        relay,
+        mode,
+        low_temp,
+        high_temp,
+        datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S"
+        ),
+        device_id
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        "status": "ok",
+        "device": device_id
+    })
 
 
-# =========================
-# MANUAL RELAY
-# =========================
-@app.route("/relay/<int:state>")
-def relay(state):
+# ==================================================
+# RELAY MANUAL
+# ==================================================
 
-    global relay_status
-    relay_status = state
+@app.route(
+    "/relay/<device_id>/<int:state>"
+)
+def relay(device_id, state):
 
-    return jsonify({"relay": relay_status})
+    create_device_if_not_exists(
+        device_id
+    )
+
+    conn = get_db()
+
+    conn.execute("""
+    UPDATE devices
+    SET
+        relay=?,
+        updated_at=?
+    WHERE device_id=?
+    """,
+    (
+        state,
+        datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S"
+        ),
+        device_id
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        "device": device_id,
+        "relay": state
+    })
 
 
-# =========================
-# RUN SERVER
-# =========================
+# ==================================================
+# LAST DATA
+# ==================================================
+
+@app.route("/last/<device_id>")
+def last_data(device_id):
+
+    conn = get_db()
+
+    row = conn.execute("""
+    SELECT *
+    FROM sensor_data
+    WHERE device_id=?
+    ORDER BY id DESC
+    LIMIT 1
+    """,
+    (device_id,)
+    ).fetchone()
+
+    conn.close()
+
+    if not row:
+        return jsonify({})
+
+    return jsonify(
+        dict(row)
+    )
+
+
+# ==================================================
+# DELETE HISTORY DEVICE
+# ==================================================
+
+@app.route(
+    "/delete_history/<device_id>",
+    methods=["POST"]
+)
+def delete_history(device_id):
+
+    conn = get_db()
+
+    conn.execute("""
+    DELETE FROM sensor_data
+    WHERE device_id=?
+    """,
+    (device_id,)
+    )
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        "status": "ok"
+    })
+
+
+# ==================================================
+# SERVER
+# ==================================================
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5008, debug=True)
+
+    app.run(
+        host="0.0.0.0",
+        port=5008,
+        debug=True
+    )
+
