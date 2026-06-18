@@ -98,7 +98,7 @@ def create_device_if_not_exists(
             device_name,
             0,
             "AUTO",
-            30,
+            31,
             34,
             datetime.now().strftime(
                 "%Y-%m-%d %H:%M:%S"
